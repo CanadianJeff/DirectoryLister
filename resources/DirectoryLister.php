@@ -26,6 +26,7 @@ class DirectoryLister {
     protected $_config        = null;
     protected $_fileTypes     = null;
     protected $_systemMessage = null;
+    protected $_docRoot       = null;
 
 
     /**
@@ -40,9 +41,28 @@ class DirectoryLister {
 
         // Set application directory
         $this->_appDir = __DIR__;
+        //echo '<br />APP DIR: ' . $this->_appDir . PHP_EOL;
 
         // Build the application URL
         $this->_appURL = $this->_getAppUrl();
+        //echo '<br />APP URL: ' . $this->_appURL . PHP_EOL;
+
+        // Set the host from the url
+        $host = (!empty($_SERVER['HTTPS']) ? 'https' : 'http') . '://' . $_SERVER['HTTP_HOST'] . '/';
+        $this->_host = $host;
+
+        // Set the root directory from the host with stripped slash
+        if(substr($host, -1) == '/') {
+            $host = substr($host, 0, -1);
+        }
+        $this->_rootdirectory = $host;
+
+        // Build the rel directory for the requested folder
+        $this->_reqREL = $_SERVER['DOCUMENT_ROOT'];
+        //echo '<br />REL REQ DIR: ' . $this->_reqREL . PHP_EOL;
+
+        // Get request uri into a variable
+        $this->_request_uri = $_SERVER['REQUEST_URI'];
 
         // Load the configuration file
         $configFile = $this->_appDir . '/config.php';
@@ -185,17 +205,22 @@ class DirectoryLister {
 
         // Set directory variable if left blank
         if ($directory === null) {
-            $directory = $this->_directory;
+            $directory = $_SERVER['REQUEST_URI'];
+            $directory = $this->_urldecode($directory);
+        }
+
+        $path_parts = pathinfo($directory);
+
+        if ($path_parts['dirname'] !== '/') {
+            $directory = $path_parts['dirname'] . '/' . $path_parts['basename'];
+        } else {
+            $directory = $path_parts['dirname'] . $path_parts['basename'];
         }
 
         // Explode the path into an array
         $dirArray = explode('/', $directory);
 
         // Statically set the Home breadcrumb
-        $breadcrumbsArray[] = array(
-            'link' => $this->_appURL,
-            'text' => 'Home'
-        );
 
         // Generate breadcrumbs
         foreach ($dirArray as $key => $dir) {
@@ -215,7 +240,18 @@ class DirectoryLister {
                 }
 
                 // Combine the base path and dir path
-                $link = $this->_appURL . '?dir=' . rawurlencode($dirPath);
+                if ($dir !== '') {
+                    $link = $dirPath;
+                } else {
+                    $link = '/';
+                    // Check if the home path came back empty
+                    // If it did just set it to the web host.
+                    if ($dir[0] == '') {
+                        $dir = $_SERVER['REQUEST_SCHEME'] . "://" . $_SERVER['HTTP_HOST'];
+                    } else {
+                        $dir = '.';
+                    }
+                }
 
                 $breadcrumbsArray[] = array(
                     'link' => $link,
@@ -266,9 +302,11 @@ class DirectoryLister {
 
         // Build the path
         if ($this->_directory == '.') {
-            $path = $this->_appURL;
+            $path = $this->_request_uri;
+            $path = $this->_urldecode($path);
         } else {
-            $path = $this->_appURL . $this->_directory;
+            $path = $this->_request_uri;
+            $path = $this->_urldecode($path);
         }
 
         // Return the path
@@ -358,7 +396,9 @@ class DirectoryLister {
         // Calculate the file size
         $fileSize = sprintf('%.2f', $bytes / pow(1024, $factor)) . $sizes[$factor];
 
-        return $fileSize;
+        $bytes = number_format($bytes);
+
+        return $bytes;
 
     }
 
@@ -395,14 +435,18 @@ class DirectoryLister {
         if (filesize($filePath) > $this->_config['hash_size_limit']) {
 
             // Notify user that file is too large
+            $hashArray['crc32']  = '[ File size exceeds threshold ]';
             $hashArray['md5']  = '[ File size exceeds threshold ]';
             $hashArray['sha1'] = '[ File size exceeds threshold ]';
+            $hashArray['sha256'] = '[ File size exceeds threshold ]';
 
         } else {
 
             // Generate file hashes
+            $hashArray['crc32']  = hash_file('crc32', $filePath);
             $hashArray['md5']  = hash_file('md5', $filePath);
             $hashArray['sha1'] = hash_file('sha1', $filePath);
+            $hashArray['sha256'] = hash_file('sha256', $filePath);
 
         }
 
@@ -508,9 +552,9 @@ class DirectoryLister {
 
         // Prevent access to parent folders
         if (strpos($dir, '<') !== false || strpos($dir, '>') !== false
-        || strpos($dir, '..') !== false || strpos($dir, '/') === 0) {
+        || strpos($dir, '..') !== false) {
             // Set the error message
-            $this->setSystemMessage('danger', '<b>ERROR:</b> An invalid path string was detected');
+            $this->setSystemMessage('danger', '<b>ERROR:</b> An invalid path string was detected in ' . $dir);
 
             // Set the directory to web root
             return '.';
@@ -561,7 +605,7 @@ class DirectoryLister {
                 } else {
 
                     // Get files absolute path
-                    $realPath = realpath($relativePath);
+                    $realPath = $relativePath;
 
                     // Determine file type by extension
                     if (is_dir($realPath)) {
@@ -599,6 +643,7 @@ class DirectoryLister {
                         $directoryArray['..'] = array(
                             'file_path'  => $this->_appURL . $directoryPath,
                             'url_path'   => $this->_appURL . $directoryPath,
+                            'data_path'  => $this->_appURL . $directoryPath,
                             'file_size'  => '-',
                             'mod_time'   => date('Y-m-d H:i:s', filemtime($realPath)),
                             'icon_class' => 'fa-level-up',
@@ -615,19 +660,23 @@ class DirectoryLister {
                         $urlPath = implode('/', array_map('rawurlencode', explode('/', $relativePath)));
 
                         if (is_dir($relativePath)) {
-                            $urlPath = '?dir=' . $urlPath;
+                            $urlPath = str_replace($_SERVER['DOCUMENT_ROOT'], '', $urlPath);
                         } else {
                             $urlPath = $urlPath;
                         }
 
                         // Add the info to the main array
                         $directoryArray[pathinfo($relativePath, PATHINFO_BASENAME)] = array(
-                            'file_path'  => $relativePath,
-                            'url_path'   => $urlPath,
-                            'file_size'  => is_dir($realPath) ? '-' : $this->getFileSize($realPath),
-                            'mod_time'   => date('Y-m-d H:i:s', filemtime($realPath)),
+                            'file_path'  => $relativePath, // info button
+                            'url_path'   => $urlPath, // a href code (relpath to download/open)
+                            'data_path'  => $relativePath, // data href code (for hashing)
+                            'file_size'  => is_dir($realPath) ? '-' : $this->getFileSize($realPath) . ' B',
+                            'mod_time'   => date('d-M-Y H:i', filemtime($realPath)),
                             'icon_class' => $iconClass,
-                            'sort'       => $sort
+                            'sort'       => $sort,
+                            //'file_crc32'      => $this->_hashfile('crc32', $relativePath),
+                            //'file_md5'        => $this->_hashfile('md5', $relativePath),
+                            //'file_sha1'       => $this->_hashfile('sha1', $relativePath)
                         );
                     }
 
@@ -638,7 +687,7 @@ class DirectoryLister {
 
         // Sort the array
         $reverseSort = in_array($this->_directory, $this->_config['reverse_sort']);
-        $sortedArray = $this->_arraySort($directoryArray, $this->_config['list_sort_order'], $reverseSort);
+        $sortedArray = $this->_arraySort($directoryArray, $this->_config['list_sort_order'], $this->_config['list_sort_field'], $reverseSort);
 
         // Return the array
         return $sortedArray;
@@ -651,17 +700,29 @@ class DirectoryLister {
      *
      * @param array $array Array to be sorted
      * @param string $sortMethod Sorting method (acceptable inputs: natsort, natcasesort, etc.)
+     * @param string $sortField Sort field that will be used for sorting (acceptable inputs: name, file_size, mod_time)
      * @param boolen $reverse Reverse the sorted array order if true (default = false)
      * @return array
      * @access protected
      */
-    protected function _arraySort($array, $sortMethod, $reverse = false) {
+    protected function _arraySort($array, $sortMethod, $sortField, $reverse = false) {
         // Create empty arrays
         $sortedArray = array();
         $finalArray  = array();
+        $keys        = array();
 
         // Create new array of just the keys and sort it
-        $keys = array_keys($array);
+        switch($sortField) {
+            case 'file_size':
+                array_walk($array, function(&$a, $b) use(&$keys) { $keys[] = $a['file_size'].'|'.$b; });
+                break;
+            case 'mod_time':
+                array_walk($array, function(&$a, $b) use(&$keys) { $keys[] = $a['mod_time'].'|'.$b; });
+                break;
+            default:
+                $keys = array_keys($array);
+                break;
+        }
 
         switch ($sortMethod) {
             case 'asort':
@@ -684,6 +745,14 @@ class DirectoryLister {
                 break;
             case 'shuffle':
                 shuffle($keys);
+                break;
+        }
+
+        // Transform keys back to the reference it will work
+        switch($sortField) {
+            case 'file_size':
+            case 'mod_time':
+                $keys = array_map(function($a) { return explode('|',$a)[1]; }, $keys);
                 break;
         }
 
@@ -899,7 +968,202 @@ class DirectoryLister {
 
         // Return the relative path
         return $relativePath;
+    }
+
+
+    /**
+     * Takes the given path and trims off the extra bits
+     *
+     * @param string $directory Path to trim
+     * @return string $directory Trimmed path
+     * @access public
+     */
+    public function _trimdir($directory = null) {
+
+        // Input Directory
+        echo '<br />TRIM INPUT DIR: ' . $directory . PHP_EOL;
+
+        // if it came in blank set one to trim?
+        if ($directory == null) { 
+            $directory = __DIR__;
+        }
+
+        // Remove document root from the given dir
+        $directory = str_replace($_SERVER['DOCUMENT_ROOT'], '', $directory);
+
+        // Output Directory
+        echo '<br />TRIM OUTPUT DIR: ' . $directory . PHP_EOL;
+
+        // Return the results
+        return $directory;
 
     }
+
+
+    /**
+     * Gets various hashes for supplied content.
+     *
+     * @param string $filename Name of the file to hash
+     * @param string $hashtype Hashing method (acceptable inputs: crc32, md5, etc.)
+     * @return string $hash The resulting hash
+     * @access public
+     */
+    public function _hashfile($hashtype, $filename) {
+
+        //Get filesize limit
+        //
+
+        //Verify is a file
+        if (is_file($filename)) {
+            $hash = hash_file($hashtype, $filename);
+        } else {
+            $hash = '-';
+        }
+
+        return $hash;
+    }
+
+
+    public function _urldecode($url) {
+        //$path = str_replace("%20", " ", $path);
+        //$path = str_replace("%26", "&", $path);
+        //$path = str_replace("%27", "'", $path);
+        //$path = str_replace("%28", "(", $path);
+        //$path = str_replace("%29", ")", $path);
+        //$path = str_replace("%2C", ",", $path);
+        //$path = str_replace("%5b", "[", $path);
+        //$path = str_replace("%5d", "]", $path);
+        $path = rawurldecode($url);
+        return $path;
+    }
+
+
+    public function _urlencode($url) {
+        //$path = str_replace(" ", "%20", $path);
+        //$path = str_replace("&", "%26", $path);
+        //$path = str_replace("'", "%27", $path);
+        //$path = str_replace("(", "%28", $path);
+        //$path = str_replace(")", "%29", $path);
+        //$path = str_replace(",", "%2C", $path);
+        //$path = str_replace("[", "%5b", $path);
+        //$path = str_replace("]", "%5d", $path);
+        $path = rawurlencode($url);
+        return $path;
+    }
+
+
+    /**
+     * Returns array of all file paths in a folder
+     *
+     * @param  string $folderPath Path to folder
+     * @return array Array of file paths
+     * @access public
+     */
+    public function getFilePath($folderPath) {
+
+        // Get list of files in the folder
+        $dirArray = $this->listDirectory($folderPath);
+
+        foreach ($dirArray as $key => $value) {
+            if (!is_dir($value['file_path'])) {
+                $pathArray[] = array(
+                    'file_path' => $value['file_path'],
+                    'file_name' => $value['url_path']
+                );
+            }
+        }
+
+        // Return the data
+        return $pathArray;
+
+    }
+
+
+    /**
+     * Set rel directory path variable
+     *
+     * @param string $path Path to directory
+     * @return string Sanitizd path to directory
+     * @access public
+     */
+    public function setRelDirectoryPath($path = null) {
+
+        // Set the directory global variable
+        $this->_directory = $this->_setRelDirectoryPath($path);
+
+        return $this->_directory;
+
+    }
+
+    /**
+     * Get rel directory path variable
+     *
+     * @return string Sanitizd path to directory
+     * @access public
+     */
+    public function getRelDirectoryPath() {
+
+        // Get the document root
+        $this->_docRoot = $this->_getDocRoot();
+        //echo '<br />GOT REL DOC ROOT: ' . $this->_docRoot . PHP_EOL;
+
+        return $this->_docRoot;
+    }
+
+
+    /**
+     * Builds the document root from server variables.
+     *
+     * @return string The path of the document root
+     * @access protected
+     */
+    protected function _getDocRoot() {
+
+        // Only use this to debug getting the doc root
+        //echo '<br />';
+        //print_r(pathinfo(substr($_SERVER['REQUEST_URI'], 0, strrpos($_SERVER['REQUEST_URI'], '/') + 1)));
+
+        // Get document root
+        $docRoot = $_SERVER['DOCUMENT_ROOT'];
+
+        // Get request uri
+        $pathParts = pathinfo($_SERVER['REQUEST_URI']);
+        if ($pathParts['dirname'] == '/') {
+            $path      = $pathParts['dirname'] . $pathParts['basename'];
+        } else {
+            $path      = $pathParts['dirname'] . '/' . $pathParts['basename'];
+        }
+
+        // Eliminate double slashes
+        while (strpos($path, '//')) {
+            $path = str_replace('//', '/', $path);
+        }
+
+        // Do some checking on the URI
+        $path = $this->_urldecode($path);
+
+        // Remove backslash from path (Windows fix)
+        if (substr($path, -1) == '\\') {
+            $path = substr($path, 0, -1);
+        }
+
+        // Ensure the path ends with a forward slash
+        if (substr($path, -1) != '/') {
+            $path = $path . '/';
+        }
+
+        // Build the full document root
+        $docRoot = $docRoot . $path;
+
+        // Set the full document root
+        $this->_directory = $docRoot;
+
+        // Echo final document root
+        //echo '<br />SENDING DOC ROOT: ' . $docRoot . PHP_EOL;
+
+        // Return the docroot
+        return $docRoot;
+    }
+
 
 }
