@@ -636,16 +636,18 @@ class DirectoryLister {
                         $directoryPath = implode('/', $pathArray);
 
                         if (!empty($directoryPath)) {
-                            $directoryPath = '?dir=' . rawurlencode($directoryPath);
+                            $directoryPath = rawurlencode($directoryPath);
                         }
+
+                        $parrentPath = dirname($_SERVER['REQUEST_URI']);
 
                         // Add file info to the array
                         $directoryArray['..'] = array(
-                            'file_path'  => $this->_appURL . $directoryPath,
-                            'url_path'   => $this->_appURL . $directoryPath,
-                            'data_path'  => $this->_appURL . $directoryPath,
+                            'file_path'  => $relativePath, // info button
+                            'url_path'   => $parrentPath, // a href code (relpath to download/open)
+                            'data_path'  => $relativePath, // data href code (for hashing)
                             'file_size'  => '-',
-                            'mod_time'   => date('Y-m-d H:i:s', filemtime($realPath)),
+                            'mod_time'   => date('d-M-Y H:i', filemtime($realPath)),
                             'icon_class' => 'fa-level-up',
                             'sort'       => 0
                         );
