@@ -636,16 +636,18 @@ class DirectoryLister {
                         $directoryPath = implode('/', $pathArray);
 
                         if (!empty($directoryPath)) {
-                            $directoryPath = rawurlencode($directoryPath);
+                            $directoryPath = rawurldecode($directoryPath);
                         }
 
-                        $parrentPath = dirname($_SERVER['REQUEST_URI']);
+                        $realtivePath = $directoryPath . $_SERVER['REQUEST_URI'];
+                        $parrentPath = dirname($realtivePath) . '/';
+                        $parrentUri = dirname($_SERVER['REQUEST_URI']);
 
                         // Add file info to the array
                         $directoryArray['..'] = array(
-                            'file_path'  => $relativePath, // info button
-                            'url_path'   => $parrentPath, // a href code (relpath to download/open)
-                            'data_path'  => $relativePath, // data href code (for hashing)
+                            'file_path'  => $parrentPath, // info button
+                            'url_path'   => $parrentUri, // a href code (relpath to download/open)
+                            'data_path'  => $parrentPath, // data href code (for hashing)
                             'file_size'  => '-',
                             'mod_time'   => date('d-M-Y H:i', filemtime($realPath)),
                             'icon_class' => 'fa-level-up',
@@ -664,7 +666,7 @@ class DirectoryLister {
                         if (is_dir($relativePath)) {
                             $urlPath = str_replace($_SERVER['DOCUMENT_ROOT'], '', $urlPath);
                         } else {
-                            $urlPath = $urlPath;
+                            $urlPath = str_replace($_SERVER['DOCUMENT_ROOT'], '', $urlPath);
                         }
 
                         // Add the info to the main array
@@ -1067,11 +1069,15 @@ class DirectoryLister {
         $dirArray = $this->listDirectory($folderPath);
 
         foreach ($dirArray as $key => $value) {
-            if (!is_dir($value['file_path'])) {
-                $pathArray[] = array(
-                    'file_path' => $value['file_path'],
-                    'file_name' => $value['url_path']
-                );
+            if ($key == '..') {
+                //Do nothing
+            } else {
+                if (!is_dir($value['file_path'])) {
+                    $pathArray[] = array(
+                        'file_path' => $value['file_path'],
+                        'file_name' => $value['url_path']
+                    );
+                }
             }
         }
 
